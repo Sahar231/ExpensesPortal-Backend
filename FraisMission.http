@@ -1,0 +1,6 @@
+@FraisMission_HostAddress = http://localhost:5111
+
+GET {{FraisMission_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
