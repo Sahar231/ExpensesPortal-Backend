@@ -3,12 +3,19 @@ using FraisMission.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using FraisMission.Configuration;
+using FraisMission.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Configuration de l'Authentification JWT
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var key = Encoding.ASCII.GetBytes(jwtSettings["Key"]!);
+builder.Services.Configure<EmailSettings>(
+    builder.Configuration.GetSection("EmailSettings")
+);
+
+builder.Services.AddScoped<EmailService>();
 
 builder.Services.AddAuthentication(options =>
 {
@@ -27,6 +34,7 @@ builder.Services.AddAuthentication(options =>
         ValidAudience = jwtSettings["Audience"],
         ValidateLifetime = true // Gère automatiquement l'expiration du token !
     };
+
 });
 
 builder.Services.AddControllers();
@@ -43,5 +51,9 @@ app.UseAuthentication(); // 1er : Est-ce que je sais qui tu es ? (Lit le JWT)
 app.UseAuthorization();  // 2ème : As-tu le droit d'accéder à cette page ? (Vérifie le rôle)
 
 app.MapControllers();
+
+
+
+
 
 app.Run();
