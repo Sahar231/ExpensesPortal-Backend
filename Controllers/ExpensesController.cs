@@ -8,20 +8,29 @@ using Microsoft.EntityFrameworkCore;
 using System;
 using System.Linq;
 using System.Text.Json;
+using FraisMission.Services;
 
 namespace FraisMission.Controllers
+
 {
+    
+
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class ExpensesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly EmailService _emailService;
 
-        public ExpensesController(ApplicationDbContext context)
+        public ExpensesController(
+            ApplicationDbContext context,
+            EmailService emailService)
         {
             _context = context;
+            _emailService = emailService;
         }
+      
 
         // 1. OBTENIR : Liste des frais avec détails complets (pour le "Voir")
         [HttpGet]
@@ -94,7 +103,7 @@ namespace FraisMission.Controllers
             var expense = _context.Expenses.FirstOrDefault(e => e.Id == id && e.EmployeeId == GetCurrentUserId());
             if (expense == null) return NotFound();
 
-            if (expense.Statut != "Brouillon" && expense.Statut != "Rejeté")
+            if (expense.Statut != "Brouillon" && expense.Statut != "Rejected")
                 return BadRequest("Modification non autorisée : note figée.");
 
             try
@@ -115,17 +124,102 @@ namespace FraisMission.Controllers
             }
         }
 
-        // 4. SOUMISSION
         [HttpPost("{id}/soumettre")]
-        public IActionResult SoumettreExpense(int id)
+        public async Task<IActionResult> SoumettreExpense(int id)
         {
-            var expense = _context.Expenses.Find(id);
-            if (expense == null) return NotFound();
-            if (expense.Statut != "Brouillon" && expense.Statut != "Rejeté") return BadRequest("Action impossible.");
+            var expense = _context.Expenses
+                .Include(e => e.Mission)
+                .Include(e => e.Employee)
+                .FirstOrDefault(e => e.Id == id);
+
+            if (expense == null)
+                return NotFound();
+
+            if (expense.Statut != "Brouillon" && expense.Statut != "Rejected")
+                return BadRequest("Action impossible.");
+
+
+            bool estResoumise = expense.Statut == "Rejected";
+
 
             expense.Statut = "Soumis";
+
             _context.SaveChanges();
-            return Ok();
+
+
+            // Récupérer le manager
+            var manager = _context.Users
+                .FirstOrDefault(u => u.Id == expense.Mission.ManagerId);
+
+
+            if (manager != null)
+            {
+                string sujet;
+                string message;
+
+
+                if (estResoumise)
+                {
+                    sujet = "Une note rejetée a été corrigée et soumise de nouveau";
+
+                    message = $@"
+            <h3>Bonjour {manager.Nom},</h3>
+
+            <p>
+            L'employé <b>{expense.Employee.Nom} {expense.Employee.Prenom}</b>
+            a corrigé une note rejetée et l'a soumise de nouveau.
+            </p>
+
+            <p>
+            <b>Mission :</b> {expense.Mission.Nom}
+            </p>
+
+            <p>
+            <b>Montant :</b> {expense.Montant} DT
+            </p>
+
+            <p>
+            Veuillez la vérifier à nouveau.
+            </p>";
+                }
+                else
+                {
+                    sujet = "Nouvelle note de frais à valider";
+
+                    message = $@"
+            <h3>Bonjour {manager.Nom},</h3>
+
+            <p>
+            Une nouvelle note de frais a été soumise par 
+            <b>{expense.Employee.Nom} {expense.Employee.Prenom}</b>.
+            </p>
+
+            <p>
+            <b>Mission :</b> {expense.Mission.Nom}
+            </p>
+
+            <p>
+            <b>Montant :</b> {expense.Montant} DT
+            </p>
+
+            <p>
+            Veuillez vous connecter pour la valider.
+            </p>";
+                }
+
+
+                await _emailService.SendEmailAsync(
+                    manager.Email,
+                    sujet,
+                    message
+                );
+            }
+
+
+            return Ok(new
+            {
+                message = "Note soumise avec succès"
+            });
         }
 
         // 5. SUPPRESSION
@@ -168,70 +262,40 @@ namespace FraisMission.Controllers
                     e.Mission.ManagerId == managerId
                 )
                 .AsEnumerable() // <--- CRUCIAL : On passe en mémoire ici
-                .Select(e => new
-                {
-                    id = e.Id,
-                    employeeNom = e.Employee.Nom,
-                    employeePrenom = e.Employee.Prenom,
-                    missionNom = e.Mission.Nom,
-                    categorie = e.Categorie,
-                    montant = e.Montant,
-                    date = e.Date,
-                    statut = e.Statut,
+                  .Select(e => new
+                  {
+                      id = e.Id,
+                      employeeNom = e.Employee.Nom,
+                      employeePrenom = e.Employee.Prenom,
+                      missionNom = e.Mission.Nom,
+                      categorie = e.Categorie,
+                      montant = e.Montant,
+                      date = e.Date,
+                      statut = e.Statut,
+                      commentaire = e.Commentaire,
+                      estResoumise = e.Statut == "Soumis"
+        && e.Approvals.Any(a => a.Status == "Rejected"),
 
-                    // Maintenant que nous sommes en mémoire (C#), 
-                    // LINQ to Objects gère mieux les valeurs nulles ou limites
-                    dernierCommentaire = e.Approvals
-                        .OrderByDescending(a => a.ReviewedAt)
-                        .Select(a => a.Comment)
-                        .FirstOrDefault(),
+                      dernierCommentaire = e.Approvals
+        .OrderByDescending(a => a.ReviewedAt)
+        .Select(a => a.Comment)
+        .FirstOrDefault(),
 
-                    dateAction = e.Approvals
-                        .OrderByDescending(a => a.ReviewedAt)
-                        .Select(a => (DateTime?)a.ReviewedAt) // Cast pour gérer les nulls
-                        .FirstOrDefault()
-                })
+                      dateAction = e.Approvals
+        .OrderByDescending(a => a.ReviewedAt)
+        .Select(a => (DateTime?)a.ReviewedAt)
+        .FirstOrDefault()
+                  })
                 .ToList();
 
             return Ok(frais);
         }
 
 
-        // =====================================================
-        // MANAGER : Voir détail d'une note
-        // =====================================================
-
-
-        [HttpGet("{id}/details")]
-        public IActionResult GetDetailsValidation(int id)
-        {
-            int managerId = GetCurrentUserId();
-
-
-            var frais = _context.Expenses
-
-                .Include(e => e.Employee)
-
-                .Include(e => e.Mission)
-                    .ThenInclude(m => m.Manager)
-
-               .Include(e => e.Approvals)
-    .ThenInclude(a => a.ReviewedBy)
-
-                .FirstOrDefault(e =>
-                    e.Id == id
-                    &&
-                    e.Mission.ManagerId == managerId
-                );
-
-
-            if (frais == null)
-                return NotFound();
 
 
 
-            return Ok(frais);
-        }
+
 
 
 
@@ -377,7 +441,7 @@ namespace FraisMission.Controllers
                 message = "Note rejetée avec succès"
             });
         }
-        
+
         [HttpGet("{id}/details-employe")]
         public IActionResult GetDetailsForEmployee(int id)
         {
@@ -400,47 +464,61 @@ namespace FraisMission.Controllers
             return Ok(details);
         }
 
-        [HttpGet("{id}/details-manager")]
-        public IActionResult GetDetailsForManager(int id)
+
+
+        [HttpGet("Statistiques")]
+        public IActionResult GetStatistiques()
         {
-            var details = _context.Expenses
-                .Where(e => e.Id == id)
-                .Select(e => new ExpenseDetailsForManagerDto
-                {
-                    Id = e.Id,
-                    EmployeNom = e.Employee.Nom,
-                    EmployePrenom = e.Employee.Prenom,
-                    EmployeEmail = e.Employee.Email,
-                    Montant = e.Montant,
-                    Commentaire = e.Commentaire
-                }).FirstOrDefault();
+            int userId = GetCurrentUserId();
 
-            return Ok(details);
+
+            var roles = User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
+            if (!roles.Any())
+            {
+                roles = User.FindAll("role").Select(c => c.Value).ToList();
+            }
+
+            bool isManager = roles.Contains("Manager");
+
+            IQueryable<Expense> query = _context.Expenses;
+
+            if (isManager)
+            {
+
+                query = query.Where(e => e.Mission != null && e.Mission.ManagerId == userId);
+            }
+            else
+            {
+
+                query = query.Where(e => e.EmployeeId == userId);
+            }
+
+            var stats = new
+            {
+                isManager = isManager,
+                totalFrais = query.Count(),
+                enAttente = query.Count(e => e.Statut == "Soumis" || e.Statut == "En attente"),
+                montantTotalApprouve = query.Where(e => e.Statut == "Approved" || e.Statut == "Approuvé").Sum(e => (decimal?)e.Montant) ?? 0,
+
+                repartitionStatuts = query.GroupBy(e => e.Statut)
+                                          .Select(g => new { label = g.Key, nombre = g.Count() })
+                                          .ToList(),
+
+
+                repartitionMissions = query.Where(e => e.Mission != null)
+                                           .GroupBy(e => e.Mission.Nom)
+                                           .Select(g => new { label = "Mission: " + g.Key, nombre = g.Count() })
+                                           .ToList(),
+
+                repartitionEmployes = query.Where(e => e.Employee != null)
+                                           .GroupBy(e => e.Employee.Nom + " " + e.Employee.Prenom)
+                                           .Select(g => new { label = g.Key, nombre = g.Count() })
+                                           .ToList()
+            };
+
+            return Ok(stats);
         }
-        [Authorize(Roles = "Manager")]
-        [HttpGet("historique")]
-        public IActionResult GetHistoriqueApprovals()
-        {
-            var historique = _context.Approvals
-                .OrderByDescending(a => a.ReviewedAt)
-                .Select(a => new
-                {
-                    // Données de la table Approvals
-                    dateAction = a.ReviewedAt,
-                    statut = a.Status,
-                    commentaire = a.Comment,
 
-                    // Données pour identifier le frais concerné
-                    missionNom = a.Expense.Mission.Nom,
-
-                    // Données de l'employé concerné
-                    employeeNom = a.Expense.Employee.Nom,
-                    employeePrenom = a.Expense.Employee.Prenom
-                })
-                .ToList();
-
-            return Ok(historique);
-        }
+        
     }
-
 }

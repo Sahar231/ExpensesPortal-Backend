@@ -14,7 +14,6 @@
         public int MissionId { get; set; }
         public string MissionNom { get; set; } = string.Empty;
 
-        // Nouveaux champs pour le "Voir"
         public string MissionLieu { get; set; } = string.Empty;
         public DateTime MissionDate { get; set; }
 
@@ -24,7 +23,7 @@
         public string Statut { get; set; } = string.Empty;
         public string Commentaire { get; set; } = string.Empty;
 
-        // Informations collaborateur
+
         public string? EmployeeNom { get; set; }
         public string? EmployeePrenom { get; set; }
         public string? EmployeeEmail { get; set; }
