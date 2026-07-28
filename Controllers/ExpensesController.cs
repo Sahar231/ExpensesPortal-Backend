@@ -13,7 +13,7 @@ using FraisMission.Services;
 namespace FraisMission.Controllers
 
 {
-    
+
 
     [Authorize]
     [Route("api/[controller]")]
@@ -30,7 +30,7 @@ namespace FraisMission.Controllers
             _context = context;
             _emailService = emailService;
         }
-      
+
 
         // 1. OBTENIR : Liste des frais avec détails complets (pour le "Voir")
         [HttpGet]
@@ -471,7 +471,7 @@ namespace FraisMission.Controllers
         {
             int userId = GetCurrentUserId();
 
-
+            // Récupération des rôles de l'utilisateur connecté
             var roles = User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
             if (!roles.Any())
             {
@@ -482,16 +482,20 @@ namespace FraisMission.Controllers
 
             IQueryable<Expense> query = _context.Expenses;
 
+            // Filtrage des données selon le rôle (Manager ou Employé)
             if (isManager)
             {
-
                 query = query.Where(e => e.Mission != null && e.Mission.ManagerId == userId);
             }
             else
             {
-
                 query = query.Where(e => e.EmployeeId == userId);
             }
+
+            // Définition de la période du mois en cours
+            var now = DateTime.Now;
+            var debutDuMois = new DateTime(now.Year, now.Month, 1);
+            var finDuMois = debutDuMois.AddMonths(1).AddDays(-1);
 
             var stats = new
             {
@@ -500,10 +504,16 @@ namespace FraisMission.Controllers
                 enAttente = query.Count(e => e.Statut == "Soumis" || e.Statut == "En attente"),
                 montantTotalApprouve = query.Where(e => e.Statut == "Approved" || e.Statut == "Approuvé").Sum(e => (decimal?)e.Montant) ?? 0,
 
+                // Nouvelles statistiques ajoutées
+                totalRejete = query.Count(e => e.Statut == "Rejected" || e.Statut == "Rejeté"),
+
+                montantCeMois = query.Where(e => e.Date >= debutDuMois && e.Date <= finDuMois && e.Statut == "Approved" || e.Statut == "Rejected")
+                                     .Sum(e => (decimal?)e.Montant) ?? 0,
+
+                // Répartitions pour les graphiques
                 repartitionStatuts = query.GroupBy(e => e.Statut)
                                           .Select(g => new { label = g.Key, nombre = g.Count() })
                                           .ToList(),
-
 
                 repartitionMissions = query.Where(e => e.Mission != null)
                                            .GroupBy(e => e.Mission.Nom)
@@ -518,7 +528,5 @@ namespace FraisMission.Controllers
 
             return Ok(stats);
         }
-
-        
     }
 }
