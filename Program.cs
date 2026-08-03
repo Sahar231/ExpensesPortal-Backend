@@ -1,6 +1,8 @@
-using Microsoft.EntityFrameworkCore;
+using FraisMission.Configuration;
 using FraisMission.Data;
+using FraisMission.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using FraisMission.Configuration;
@@ -8,7 +10,10 @@ using FraisMission.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Configuration de l'Authentification JWT
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
+builder.Services.AddScoped<EmailService>(); // Ou Transient
+
+
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var key = Encoding.ASCII.GetBytes(jwtSettings["Key"]!);
 builder.Services.Configure<EmailSettings>(
@@ -32,23 +37,22 @@ builder.Services.AddAuthentication(options =>
         ValidIssuer = jwtSettings["Issuer"],
         ValidateAudience = true,
         ValidAudience = jwtSettings["Audience"],
-        ValidateLifetime = true // Gère automatiquement l'expiration du token !
+        ValidateLifetime = true
     };
 
 });
 
-builder.Services.AddControllers();
 
+builder.Services.AddControllers();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var app = builder.Build();
 
-// ?? TRÈS IMPORTANT : L'ordre des middlewares est crucial !
 app.UseCors(policy => policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
 
-app.UseAuthentication(); // 1er : Est-ce que je sais qui tu es ? (Lit le JWT)
-app.UseAuthorization();  // 2ème : As-tu le droit d'accéder à cette page ? (Vérifie le rôle)
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 

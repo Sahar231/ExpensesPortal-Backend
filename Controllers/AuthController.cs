@@ -15,9 +15,8 @@ namespace FraisMission.Controllers
     public class AuthController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly IConfiguration _configuration; // Added for JWT
+        private readonly IConfiguration _configuration;
 
-        // Le constructeur reçoit maintenant DbContext ET Configuration
         public AuthController(ApplicationDbContext context, IConfiguration configuration)
         {
             _context = context;
@@ -27,13 +26,21 @@ namespace FraisMission.Controllers
         [HttpPost("signup")]
         public IActionResult Register([FromBody] RegisterDto dto)
         {
-            // Normaliser en amont
+            // Normalisation mta3 l-email
             string cleanEmail = dto.Email.Trim().ToLower();
-            if (_context.Users.Any(u => u.Email.Trim().ToLower() == cleanEmail))
+
+            // Optimisation SQL: mghir Trim()/ToLower() fi l-Linq query
+            if (_context.Users.Any(u => u.Email == cleanEmail))
                 return BadRequest(new { message = "Cet email est déjà utilisé." });
 
-            var user = new User { Nom = dto.Nom, Prenom = dto.Prenom, Email = cleanEmail, MotDePasse = BCrypt.Net.BCrypt.HashPassword(dto.Password), Role = dto.Role };
-            user.Email = cleanEmail;
+            var user = new User
+            {
+                Nom = dto.Nom,
+                Prenom = dto.Prenom,
+                Email = cleanEmail,
+                MotDePasse = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+                Role = dto.Role
+            };
 
             _context.Users.Add(user);
             try
@@ -52,39 +59,44 @@ namespace FraisMission.Controllers
             }
         }
 
-        [HttpPost("login")] // URL: https://localhost:7212/api/auth/login
+        [HttpPost("login")]
         public IActionResult Login([FromBody] LoginDto dto)
         {
-            string cleanEmail = dto.Email.Trim().ToLower();
+            // 1. Clean el-email f C#
+            string cleanEmail = dto.Email?.Trim().ToLower() ?? "";
 
-            // 1. Vérifier si l'utilisateur existe
-            var user = _context.Users.FirstOrDefault(u => u.Email.Trim().ToLower() == cleanEmail);
+            // 2. Recherche rapide fi SQL (Utilise l'index de la base de données)
+            var user = _context.Users.FirstOrDefault(u => u.Email == cleanEmail);
+
+            // Message unifié si l'email n'existe pas
             if (user == null)
             {
-                return BadRequest(new { message = "Email inncorrect." });
+                return BadRequest(new { message = "Email ou mot de passe incorrect." });
             }
 
-            // 2. Vérifier le mot de passe haché
+            // 3. Vérification du mot de passe
             bool isPasswordValid = BCrypt.Net.BCrypt.Verify(dto.Password, user.MotDePasse);
+
+            // Même message unifié si le mot de passe est faux
             if (!isPasswordValid)
             {
-                return BadRequest(new { message = " mot de passe incorrect." });
+                return BadRequest(new { message = "Email ou mot de passe incorrect." });
             }
 
-            // 3. Génération du JWT Token
+            // 4. Génération du JWT Token
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.ASCII.GetBytes(_configuration["Jwt:Key"]!);
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(new[]
-{
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new Claim(ClaimTypes.Name, user.Nom),
-                new Claim(ClaimTypes.Email, user.Email),
-                new Claim(ClaimTypes.Role, user.Role)
-}),
-                Expires = DateTime.UtcNow.AddHours(2), // Expiration automatique après 2h
+                {
+                    new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                    new Claim(ClaimTypes.Name, user.Nom ?? ""),
+                    new Claim(ClaimTypes.Email, user.Email ?? ""),
+                    new Claim(ClaimTypes.Role, user.Role ?? "")
+                }),
+                Expires = DateTime.UtcNow.AddHours(2),
                 Issuer = _configuration["Jwt:Issuer"],
                 Audience = _configuration["Jwt:Audience"],
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
@@ -93,11 +105,11 @@ namespace FraisMission.Controllers
             var token = tokenHandler.CreateToken(tokenDescriptor);
             var tokenString = tokenHandler.WriteToken(token);
 
-            // 4. Réponse envoyée à Angular
+            // 5. Réponse envoyée à Angular
             return Ok(new
             {
                 message = "Connexion réussie !",
-                token = tokenString, // Le fameux précieux sésame 🔑
+                token = tokenString,
                 user = new { user.Nom, user.Prenom, user.Email, user.Role }
             });
         }
