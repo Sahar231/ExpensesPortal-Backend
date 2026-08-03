@@ -11,7 +11,10 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace FraisMission.Controllers
+
 {
+
+
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
@@ -140,7 +143,6 @@ namespace FraisMission.Controllers
             }
         }
 
-        // 4. SOUMISSION
         [HttpPost("{id}/soumettre")]
         public async Task<IActionResult> SoumettreExpense(int id)
         {
@@ -162,6 +164,7 @@ namespace FraisMission.Controllers
 
             bool estResoumise = expense.Statut == "Rejected";
             expense.Statut = "Soumis";
+
             _context.SaveChanges();
 
             if (expense.Mission == null)
