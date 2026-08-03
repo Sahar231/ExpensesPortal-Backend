@@ -4,10 +4,12 @@
 		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
-	</PropertyGroup>
+	  <UserSecretsId>16fd8e8e-847c-403e-9a06-c5c376cee5aa</UserSecretsId>
+  </PropertyGroup>
 
 	<ItemGroup>
 		<PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
+		<PackageReference Include="MailKit" Version="4.17.0" />
 		<PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.12" />
 		<PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.28" />
 		<PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.28">
